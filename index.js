@@ -129,6 +129,7 @@ async function getWidgetId(url, cookie, companyId) {
     }
 }
 
+
 // Add Notes
 async function addSpaceNotes(url, cookie, notes, companyId, sectionId, layoutId) {
     try {
@@ -236,7 +237,33 @@ async function sendInvitation(url, cookie, companyId, personId, email) {
         throw error;
     }
 }
+async function updateWidgetDetails(url, cookie, companyGsid, layoutId, widgetDetails) {
+  const apiUrl = `${url}/v2/galaxy/spaces/customisation/save/Company/${companyGsid}/${layoutId}`
 
+  try {
+    console.log("Yuva")
+    console.dir(widgetDetails)
+    const response = await fetch(apiUrl, {
+      method: "PUT",
+      headers: {
+        Cookie: cookie,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(widgetDetails),
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    const result = await response.json()
+    console.log("Widget updated successfully:", result)
+    return result
+  } catch (error) {
+    console.error("Error updating widget:", error)
+    throw error
+  }
+}
 async function processSharedSpace(results, url, cookie) {
     const outcome = [];
 
@@ -252,6 +279,7 @@ async function processSharedSpace(results, url, cookie) {
 
         try {
             const { layoutId, sectionId, widgetDetails } = await getWidgetId(url, cookie, Company_GSID);
+            console.log( widgetDetails, "widgetDetails");
             recordResult.messages.push("Fetched widget details");
 
             // Optional widget config
@@ -269,6 +297,8 @@ async function processSharedSpace(results, url, cookie) {
                 }
             }
 
+            await updateWidgetDetails(url, cookie, Company_GSID, layoutId, widgetDetails);
+            recordResult.messages.push("Widget updated");
             await addSpaceNotes(url, cookie, Space_Notes || "", Company_GSID, sectionId, layoutId);
             recordResult.messages.push("Notes added");
 
