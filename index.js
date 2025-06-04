@@ -318,7 +318,15 @@ async function processSharedSpace(results, url, cookie) {
 
                 if (Welcome_Banner) {
                     widgetDetails.config.bannerText = { value: Welcome_Banner };
+                    // Ensure nested structure exists
+                    widgetDetails.config.bannerContent = widgetDetails.config.bannerContent || {};
+                    widgetDetails.config.bannerContent.value = widgetDetails.config.bannerContent.value || {};
+                    // Now it's safe to assign
+                    widgetDetails.config.bannerContent.value.attachmentUrl = "../../../assets/images/banner1-TN.svg";
+                    widgetDetails.config.bannerContent.value.url = "../../../assets/images/banner1-TN.svg";
+                    widgetDetails.config.bannerContent.value.bannerUrl = "../../../assets/images/banner1-TN.svg";
                 }
+
             }
 
             await updateWidgetDetails(url, cookie, Company_GSID, layoutId, widgetDetails);
