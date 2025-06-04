@@ -237,32 +237,56 @@ async function sendInvitation(url, cookie, companyId, personId, email) {
         throw error;
     }
 }
-async function updateWidgetDetails(url, cookie, companyGsid, layoutId, widgetDetails) {
-  const apiUrl = `${url}/v2/galaxy/spaces/customisation/save/Company/${companyGsid}/${layoutId}`
+async function addUser(url, cookie, companyId, email) {
+    try {
+        const data = {
+            "Name": email.split("@")[0],
+            "Email": email,
+            "companies": [
+                {
+                    "Company_ID": companyId
+                }
+            ]
+        }
 
-  try {
-    console.log("Yuva")
-    console.dir(widgetDetails)
-    const response = await fetch(apiUrl, {
-      method: "PUT",
-      headers: {
-        Cookie: cookie,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(widgetDetails),
-    })
+        const response = await axios.put(`${url}/v1/peoplemgmt/v1.0/people?areaName=PersonC360UI`, data, {
+            headers: { 'Cookie': cookie, 'Content-Type': 'application/json' },
+            maxBodyLength: Infinity
+        });
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
+        console.log(`✅ Invitation sent to ${email}`);
+        return response.data;
+    } catch (error) {
+        console.error(`❌ Invitation failed for ${email}:`, error.message);
+        throw error;
     }
+}
+async function updateWidgetDetails(url, cookie, companyGsid, layoutId, widgetDetails) {
+    const apiUrl = `${url}/v2/galaxy/spaces/customisation/save/Company/${companyGsid}/${layoutId}`
 
-    const result = await response.json()
-    console.log("Widget updated successfully:", result)
-    return result
-  } catch (error) {
-    console.error("Error updating widget:", error)
-    throw error
-  }
+    try {
+        console.log("Yuva")
+        console.dir(widgetDetails)
+        const response = await fetch(apiUrl, {
+            method: "PUT",
+            headers: {
+                Cookie: cookie,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(widgetDetails),
+        })
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`)
+        }
+
+        const result = await response.json()
+        console.log("Widget updated successfully:", result)
+        return result
+    } catch (error) {
+        console.error("Error updating widget:", error)
+        throw error
+    }
 }
 async function processSharedSpace(results, url, cookie) {
     const outcome = [];
@@ -279,7 +303,7 @@ async function processSharedSpace(results, url, cookie) {
 
         try {
             const { layoutId, sectionId, widgetDetails } = await getWidgetId(url, cookie, Company_GSID);
-            console.log( widgetDetails, "widgetDetails");
+            console.log(widgetDetails, "widgetDetails");
             recordResult.messages.push("Fetched widget details");
 
             // Optional widget config
@@ -299,19 +323,37 @@ async function processSharedSpace(results, url, cookie) {
 
             await updateWidgetDetails(url, cookie, Company_GSID, layoutId, widgetDetails);
             recordResult.messages.push("Widget updated");
+
             await addSpaceNotes(url, cookie, Space_Notes || "", Company_GSID, sectionId, layoutId);
             recordResult.messages.push("Notes added");
 
             await addSucessPlan(url, cookie, Success_Plan_GSID);
             recordResult.messages.push("Success Plan added");
 
-            const user = await trySearchUser(url, cookie, Company_GSID, Invite_Email);
-            if (user) {
-                await sendInvitation(url, cookie, Company_GSID, user.person__Gsid, Invite_Email);
-                recordResult.messages.push("Invitation sent");
-            } else {
-                recordResult.status = "Partial";
-                recordResult.messages.push(`User not found for ${Invite_Email}, invitation skipped`);
+            // Process each email individually
+            const emailList = Invite_Email ? Invite_Email.split(',').map(e => e.trim()).filter(Boolean) : [];
+            for (const email of emailList) {
+                try {
+                    let user = await trySearchUser(url, cookie, Company_GSID, email);
+                    if (user) {
+                        await sendInvitation(url, cookie, Company_GSID, user.person__Gsid, email);
+                        recordResult.messages.push(`Invitation sent to ${email}`);
+                    } else {
+                        await addUser(url, cookie, Company_GSID, email);
+                        user = await trySearchUser(url, cookie, Company_GSID, email);
+                        if (user?.person__Gsid) {
+                            await sendInvitation(url, cookie, Company_GSID, user.person__Gsid, email);
+                            recordResult.messages.push(`User added and invitation sent to ${email}`);
+                        } else {
+                            recordResult.status = "Partial";
+                            recordResult.messages.push(`User could not be added or invited for ${email}`);
+                        }
+                    }
+                } catch (emailErr) {
+                    recordResult.status = "Partial";
+                    recordResult.messages.push(`Error with ${email}: ${emailErr.message}`);
+                    console.error(`❌ Error processing invitation for ${email}:`, emailErr.message);
+                }
             }
 
         } catch (err) {
@@ -325,6 +367,7 @@ async function processSharedSpace(results, url, cookie) {
 
     return outcome;
 }
+
 
 app.use(express.static(path.join(__dirname, 'build')));
 app.get('', (req, res) => {
