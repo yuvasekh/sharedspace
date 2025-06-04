@@ -1,4 +1,10 @@
 {
+    "name": "shared-space",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
   "dependencies": {
     "axios": "^1.9.0",
     "cors": "^2.8.5",

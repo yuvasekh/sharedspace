@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const csv = require('csv-parser');
 const axios = require('axios');
-const cors=require('cors')
+const cors = require('cors')
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -296,6 +296,10 @@ async function processSharedSpace(results, url, cookie) {
     return outcome;
 }
 
+app.use(express.static(path.join(__dirname, 'build')));
+app.get('', (req, res) => {
+    res.sendFile(path.join(__dirname, 'build', 'index.html'));
+});
 
 
 // Global Error Middleware
