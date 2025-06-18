@@ -209,7 +209,54 @@ async function trySearchUser(url, cookie, companyId, email) {
         return null;
     }
 }
+async function tryCockPitSearchUser(url, cookie, companyId, email) {
+    try {
+        const response = await axios.post(`${url}/v1/users/search`, {
+            "limit": 25,
+            "filters": [
+                {
+                    "attributes": [
+                        "Email"
+                    ],
+                    "operator": "equals",
+                    "values": [
+                        email
+                    ]
+                },
+                {
+                    "attributes": [
+                        "IsActiveUser"
+                    ],
+                    "operator": "equals",
+                    "values": [
+                        true
+                    ]
+                },
+                {
+                    "attributes": [
+                        "SystemType"
+                    ],
+                    "operator": "equals",
+                    "values": [
+                        "Internal"
+                    ]
+                }
+            ]
+        }, {
+            headers: { 'Cookie': cookie, 'Content-Type': 'application/json' },
+            maxBodyLength: Infinity
+        });
 
+        const person = response?.data?.data;
+        console.dir(person, { depth: null })
+        console.log(person.users, "person")
+        return person.users[0]?.Gsid ? person.users[0]?.Gsid : null;
+
+    } catch (err) {
+        console.error(`Failed to search user (${email}) for companyId=${companyId}:`, err.message);
+        return null;
+    }
+}
 async function sendInvitation(url, cookie, companyId, personId, email) {
     try {
         const data = {
@@ -292,7 +339,7 @@ async function processSharedSpace(results, url, cookie) {
     const outcome = [];
 
     for (const row of results) {
-        const { Company_GSID, Video_URL, Welcome_Banner, Space_Notes, Success_Plan_GSID, Invite_Email } = row;
+        const { Company_GSID, Video_URL, Welcome_Banner, Space_Notes, Success_Plan_GSID, Invite_Email, CTA_Owner_Email } = row;
         const recordResult = {
             Company_GSID,
             Video_URL,
@@ -328,7 +375,6 @@ async function processSharedSpace(results, url, cookie) {
                     widgetDetails.config.bannerContent.value.url = "../../../assets/images/banner1-TN.svg";
                     widgetDetails.config.bannerContent.value.bannerUrl = "../../../assets/images/banner1-TN.svg";
                 }
-
             }
 
             await updateWidgetDetails(url, cookie, Company_GSID, layoutId, widgetDetails);
@@ -363,6 +409,141 @@ async function processSharedSpace(results, url, cookie) {
                     recordResult.status = "Partial";
                     recordResult.messages.push(`Error with ${email}: ${emailErr.message}`);
                     console.error(`❌ Error processing invitation for ${email}:`, emailErr.message);
+                }
+            }
+
+            // Handle CTA Owner Email
+            console.log(CTA_Owner_Email, "CTA_Owner_Email")
+
+            if (CTA_Owner_Email) {
+                var userId = await tryCockPitSearchUser(url, cookie, Company_GSID, CTA_Owner_Email)
+                console.log(userId, "user111")
+
+                console.log(CTA_Owner_Email, "CTA_Owner_Email")
+                try {
+                    // Step 1: Get cockpit views to find "All CTAs" view
+                    const cockpitResponse = await fetch(`${url}/v1/cockpit/view?category=CTA,TASK&extUserId=&context=COCKPIT&subContext=`, {
+                        method: 'GET',
+                        headers: {
+                            'Cookie': cookie,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+
+                    if (!cockpitResponse.ok) {
+                        throw new Error(`Failed to fetch cockpit views: ${cockpitResponse.status}`);
+                    }
+
+                    const cockpitData = await cockpitResponse.json();
+                    console.log(cockpitData, "cockpitData")
+
+                    // Step 2: Find the view with name "All CTAs"
+                    const allCTAsView = cockpitData?.data.find(view => view.name === "All CTAs");
+
+                    if (!allCTAsView) {
+                        throw new Error("Could not find 'All CTAs' view in cockpit response");
+                    }
+                    console.log(allCTAsView.gsid, "allCTAsView.gsid")
+
+                    const viewId = allCTAsView.gsid;
+
+                    // Step 3: Call the CTA fetch API with the viewId
+                    const ctaPayload = {
+                        entityType: "COMPANY",
+                        companyId: Company_GSID,
+                        viewId: viewId,
+                        context: "C360",
+                        searchTerm: ""
+                    };
+
+                    const ctaResponse = await fetch(`${url}/v1/cockpit/cta/fetch/view`, {
+                        method: 'POST',
+                        headers: {
+                            'Cookie': cookie,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(ctaPayload)
+                    });
+
+                    if (!ctaResponse.ok) {
+                        throw new Error(`Failed to fetch CTAs: ${ctaResponse.status}`);
+                    }
+
+                    const ctaData = await ctaResponse.json();
+                    console.dir(ctaData.data)
+                    console.log("ctaData")
+
+                    // Step 4: Process each CTA and assign owner
+                    if (ctaData.data && ctaData.data?.ctas.length > 0) {
+                        let assignmentResults = [];
+
+                        for (const cta of ctaData.data?.ctas) {
+                            try {
+                                // Prepare the assignment payload
+                                const assignmentPayload = {
+                                    "OwnerId": userId, // Assuming this contains the owner ID
+                                    "Gsid": cta.gsid || cta.Gsid // Use the CTA's GSID
+                                };
+                                console.log(assignmentPayload, "assignmentPayload")
+
+                                console.log(`Assigning owner ${CTA_Owner_Email} to CTA ${assignmentPayload.Gsid}`);
+
+                                // Step 5: Call the owner assignment API
+                                const assignmentResponse = await fetch(`${url}/v1/cockpit/cta`, {
+                                    method: 'PUT', // Assuming PUT for update, change to POST if needed
+                                    headers: {
+                                        'Cookie': cookie,
+                                        'Content-Type': 'application/json'
+                                    },
+                                    body: JSON.stringify(assignmentPayload)
+                                });
+
+                                if (!assignmentResponse.ok) {
+                                    throw new Error(`Failed to assign owner to CTA ${assignmentPayload.Gsid}: ${assignmentResponse.status}`);
+                                }
+
+                                const assignmentResult = await assignmentResponse.json();
+                                assignmentResults.push({
+                                    ctaGsid: assignmentPayload.Gsid,
+                                    status: 'success',
+                                    result: assignmentResult
+                                });
+
+                                console.log(`✅ Successfully assigned owner to CTA ${assignmentPayload.Gsid}`);
+
+                            } catch (assignmentErr) {
+                                console.error(`❌ Error assigning owner to CTA ${cta.gsid || cta.Gsid}:`, assignmentErr.message);
+                                assignmentResults.push({
+                                    ctaGsid: cta.gsid || cta.Gsid,
+                                    status: 'error',
+                                    error: assignmentErr.message
+                                });
+                            }
+                        }
+
+                        // Log summary of assignment results
+                        const successCount = assignmentResults.filter(r => r.status === 'success').length;
+                        const errorCount = assignmentResults.filter(r => r.status === 'error').length;
+
+                        recordResult.messages.push(`CTA owner assignment completed: ${successCount} successful, ${errorCount} failed`);
+                        console.log(`CTA owner assignment summary: ${successCount} successful, ${errorCount} failed`);
+
+                        if (errorCount > 0) {
+                            recordResult.status = "Partial";
+                            recordResult.messages.push(`Some CTA owner assignments failed for ${CTA_Owner_Email}`);
+                        }
+                    } else {
+                        recordResult.messages.push(`No CTAs found for company ${Company_GSID}`);
+                        console.log("No CTAs found to assign owners to");
+                    }
+
+                    recordResult.messages.push(`CTA data fetched and processed for owner ${CTA_Owner_Email}`);
+                    console.log('CTA processing completed');
+
+                } catch (ctaErr) {
+                    recordResult.status = "Partial";
+                    recordResult.messages.push(`Error processing CTA for ${CTA_Owner_Email}: ${ctaErr.message}`);
+                    console.error(`❌ Error processing CTA for ${CTA_Owner_Email}:`, ctaErr.message);
                 }
             }
 
