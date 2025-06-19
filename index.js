@@ -255,7 +255,7 @@ async function tryCockPitSearchUser(url, cookie, companyId, email) {
         const person = response?.data?.data;
         console.dir(person, { depth: null })
         console.log("person")
-        return person.records[0]?.Gsid ? person.records[0]?.Gsid : null;
+        return person.records[0]?.Person_ID ? person.records[0]?.Person_ID : null;
 
     } catch (err) {
         console.error(`Failed to search user (${email}) for companyId=${companyId}:`, err.message);
