@@ -211,42 +211,15 @@ async function trySearchUser(url, cookie, companyId, email) {
 }
 async function tryCockPitSearchUser(url, cookie, companyId, email) {
     try {
-        const response = await axios.post(`${url}/v2/queries/company_person`,
+        const response = await axios.post(`${url}/v1/api/standardobjects/user/findOrCreateRecord`,
             {
-                "select": [
-                    "Gsid",
-                    "Person_ID__gr.Name",
-                    "Person_ID__gr.Email",
-                    "Person_ID__gr.FirstName",
-                    "Person_ID__gr.LastName",
-                    "Person_ID"
-                ],
-                "where": {
-                    "conditions": [
-                        {
-                            "name": "Company_ID",
-                            "alias": "A",
-                            "value": [
-                               companyId
-                            ],
-                            "operator": "EQ"
-                        },
-                        {
-                            "name": "Person_ID__gr.Email",
-                            "alias": "B",
-                            "value": [
-                               email
-                            ],
-                            "operator": "contains"
-                        }
-                    ],
-                    "expression": "(A) AND (B)"
-                },
-                "orderBy": {
-                    "Gsid": "asc"
-                },
-                "limit": 100,
-                "offset": 0
+                "SystemType": "External",
+                "IsActiveUser": "true",
+                "CompanyID": companyId,
+                "Email": email,
+                "Name": null,
+                "FirstName": null,
+                "LastName": null
             }, {
             headers: { 'Cookie': cookie, 'Content-Type': 'application/json' },
             maxBodyLength: Infinity
@@ -255,7 +228,7 @@ async function tryCockPitSearchUser(url, cookie, companyId, email) {
         const person = response?.data?.data;
         console.dir(person, { depth: null })
         console.log("person")
-        return person.records[0]?.Person_ID ? person.records[0]?.Person_ID : null;
+        return person.result[0]?.Gsid ? person.result[0]?.Gsid : null;
 
     } catch (err) {
         console.error(`Failed to search user (${email}) for companyId=${companyId}:`, err.message);
