@@ -584,8 +584,7 @@ function generateEmailHTML(contactName) {
 async function sendInvitation(url, cookie, companyId, personId, email, Invite_Name) {
     try {
         const emailBody = generateEmailHTML(Invite_Name);
-        
-      
+        console.log(emailBody);
         const data = {
             entityId: companyId,
             companyId,
@@ -598,7 +597,6 @@ async function sendInvitation(url, cookie, companyId, personId, email, Invite_Na
             emailBody: emailBody,
             emailSubject: "You're invited to join Spaces — Take Action to Access your Unit4 Success Plan and More!"
         }
-          console.log(emailBody,"yuva");
 
         const response = await axios.post(`${url}/v1/spaces/invite/company/persons`, data, {
             headers: { 'Cookie': cookie, 'Content-Type': 'application/json' },
