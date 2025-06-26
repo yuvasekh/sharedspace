@@ -29,10 +29,10 @@ const fileFilter = (req, file, cb) => {
         'application/vnd.ms-excel',
         'application/vnd.ms-excel.sheet.macroEnabled.12'
     ];
-    
+
     const allowedExtensions = ['.xlsx', '.xls', '.xlsm'];
     const fileExtension = path.extname(file.originalname).toLowerCase();
-    
+
     if (allowedTypes.includes(file.mimetype) || allowedExtensions.includes(fileExtension)) {
         cb(null, true);
     } else {
@@ -53,17 +53,17 @@ app.use(cors());
 // Function to convert text with hyperlinks to HTML format
 function convertTextToSpacesNotesHTML(text, hyperlinks = []) {
     if (!text) return "";
-    
+
     let htmlContent = text;
-    
+
     // Split text into paragraphs (assuming line breaks separate paragraphs)
     const paragraphs = htmlContent.split(/\n\s*\n|\r\n\s*\r\n/).filter(p => p.trim());
-    
+
     let formattedHTML = "";
-    
+
     paragraphs.forEach((paragraph, index) => {
         let paragraphText = paragraph.trim();
-        
+
         // Replace hyperlinks in the paragraph
         hyperlinks.forEach(link => {
             if (paragraphText.includes(link.text)) {
@@ -71,7 +71,7 @@ function convertTextToSpacesNotesHTML(text, hyperlinks = []) {
                 paragraphText = paragraphText.replace(link.text, linkHTML);
             }
         });
-        
+
         // Handle special formatting
         paragraphText = paragraphText
             // Convert arrows and special characters
@@ -80,43 +80,43 @@ function convertTextToSpacesNotesHTML(text, hyperlinks = []) {
             // Handle line breaks within paragraphs
             .replace(/\n/g, '&lt;br&gt;')
             .replace(/\r\n/g, '&lt;br&gt;');
-        
+
         // Wrap in paragraph tags
         if (index === 0 && paragraphText.includes('→')) {
             formattedHTML += `&lt;p id=&quot;isPasted&quot;&gt;${paragraphText}&lt;/p&gt;`;
         } else {
             formattedHTML += `&lt;p&gt;${paragraphText}&lt;/p&gt;`;
         }
-        
+
         // Add line break between paragraphs (except for the last one)
         if (index < paragraphs.length - 1) {
             formattedHTML += `&lt;p&gt;&lt;br&gt;&lt;/p&gt;`;
         }
     });
-    
+
     return formattedHTML;
 }
 
 // Enhanced function to extract hyperlinks and convert to SpacesNotes format
 function processSpaceNotesWithHyperlinks(spaceNotesText, extractedHyperlinks = []) {
     if (!spaceNotesText) return "";
-    
+
     console.log('Processing Space Notes:', spaceNotesText);
     console.log('Extracted hyperlinks:', extractedHyperlinks);
-    
+
     // Common hyperlinks that might be in the text
     const commonLinks = [
         { text: "here", url: "https://community.unit4.com/t5/Success-Outcomes/bg-p/SuccessOutcomes" },
         { text: "Community4U", url: "https://community.unit4.com/" },
         { text: "Success.Hub@Unit4.com", url: "mailto:Success.Hub@Unit4.com" }
     ];
-    
+
     // Combine extracted hyperlinks with common ones
     const allHyperlinks = [...extractedHyperlinks, ...commonLinks];
-    
+
     // Convert to HTML format
     const htmlContent = convertTextToSpacesNotesHTML(spaceNotesText, allHyperlinks);
-    
+
     return htmlContent;
 }
 
@@ -127,7 +127,7 @@ function extractHyperlinksFromWorksheet(worksheet, jsonData) {
     const extractedHyperlinks = [];
 
     const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
-    
+
     const headers = [];
     for (let col = range.s.c; col <= range.e.c; col++) {
         const headerCell = worksheet[XLSX.utils.encode_cell({ r: range.s.r, c: col })];
@@ -193,7 +193,7 @@ function extractHyperlinksFromWorksheet(worksheet, jsonData) {
                         link: linkUrl,
                         hasHyperlink: true,
                     };
-                    
+
                     // Store hyperlink for Space Notes processing
                     extractedHyperlinks.push({
                         text: displayText,
@@ -201,10 +201,10 @@ function extractHyperlinksFromWorksheet(worksheet, jsonData) {
                         column: header,
                         cell: cellAddress
                     });
-                    
+
                     totalHyperlinks++;
                 }
-                
+
                 // Special processing for Space_Notes column
                 if (header === 'Space_Notes' && displayText) {
                     const spaceNotesHTML = processSpaceNotesWithHyperlinks(displayText, extractedHyperlinks);
@@ -219,7 +219,7 @@ function extractHyperlinksFromWorksheet(worksheet, jsonData) {
 
     console.log(`Total hyperlinks extracted: ${totalHyperlinks}`);
     console.log('All extracted hyperlinks:', extractedHyperlinks);
-    
+
     return processedData;
 }
 
@@ -257,7 +257,7 @@ app.post("/api/xlsxfileupload", upload.single("file"), async (req, res) => {
         });
 
         filePath = req.file.path;
-        
+
         if (!fs.existsSync(filePath)) {
             throw new Error(`Uploaded file not found at path: ${filePath}`);
         }
@@ -346,7 +346,7 @@ app.post("/api/xlsxfileupload", upload.single("file"), async (req, res) => {
     } catch (err) {
         console.error("Excel upload handler error:", err.message);
         console.error("Stack trace:", err.stack);
-        
+
         res.status(500).json({
             success: false,
             message: "An error occurred during Excel file processing.",
@@ -371,14 +371,14 @@ app.post('/api/csvfileupload', upload.single('csvFile'), async (req, res) => {
             return res.status(400).json({ success: false, message: 'No file uploaded' });
         }
         const { url, cookie } = req.body;
-        
+
         if (!url || !cookie) {
             return res.status(400).json({ success: false, message: "Missing 'url' or 'cookie' in ConnectionDetails" });
         }
 
         const results = [];
         const csv = require('csv-parser');
-        
+
         fs.createReadStream(req.file.path)
             .pipe(csv())
             .on('data', (data) => results.push(data))
@@ -580,7 +580,21 @@ function generateEmailHTML(contactName) {
     htmlTemplate = htmlTemplate.replace('[Contact Name]', contactName)
     return htmlTemplate;
 }
+function convertTextToEncodedHtml(inputText) {
+  // Step 1: Replace new lines with <br>
+  const htmlFormatted = inputText
+    .replace(/\n\s*\n/g, '<br><br>') // Double line breaks to two <br>
+    .replace(/\n/g, ' ')             // Single line breaks to space
+    .replace(/→/g, '&rarr;');        // Replace arrow with HTML entity if needed
 
+  // Step 2: Wrap in <p> tags
+  const wrapped = `<p>${htmlFormatted}</p>`;
+
+  // Step 3: Encode the entire string using encodeURIComponent
+  const encoded = encodeURIComponent(wrapped);
+
+  return  encoded
+}
 async function sendInvitation(url, cookie, companyId, personId, email, Invite_Name) {
     try {
         const emailBody = generateEmailHTML(Invite_Name);
@@ -602,6 +616,8 @@ async function sendInvitation(url, cookie, companyId, personId, email, Invite_Na
             headers: { 'Cookie': cookie, 'Content-Type': 'application/json' },
             maxBodyLength: Infinity
         });
+        console.dir(response.data,{depth:null});
+        console.log("yuva")
 
         console.log(`✅ Invitation sent to ${email}`);
         return response.data;
@@ -667,7 +683,7 @@ async function updateWidgetDetails(url, cookie, companyGsid, layoutId, widgetDet
 // Updated processSharedSpace function to handle hyperlinks
 async function processSharedSpace(results, url, cookie) {
     const outcome = [];
-console.log(results, "results")
+    console.log(results, "results")
     for (const row of results) {
         // Extract values, handling both regular strings and hyperlink objects
         const Company_GSID = getDisplayText(row.Company_GSID);
@@ -703,14 +719,29 @@ console.log(results, "results")
                 };
                 widgetDetails.config.bannerLayoutType.layoutName = "WITH_MEDIA_CONTENT_LAYOUT"
                 if (Welcome_Banner) {
-                    widgetDetails.config.bannerText = { value: Welcome_Banner };
-                    widgetDetails.config.bannerContent = widgetDetails.config.bannerContent || {};
-                    widgetDetails.config.bannerContent.value = widgetDetails.config.bannerContent.value || {};
-                    widgetDetails.config.bannerContent.value.bannerName = "banner1-TN.svg";
-                    widgetDetails.config.bannerContent.value.attachmentName = "../../../assets/images/banner1-TN.svg";
-                    widgetDetails.config.bannerContent.value.attachmentUrl = "../../../assets/images/banner1-TN.svg";
-                    widgetDetails.config.bannerContent.value.url = "../../../assets/images/banner1-TN.svg";
-                    widgetDetails.config.bannerContent.value.bannerUrl = "../../../assets/images/banner1-TN.svg";
+                    let refinedText=await convertTextToEncodedHtml(Welcome_Banner)
+                    widgetDetails.config.bannerText = { value: refinedText };
+                    widgetDetails.config.bannerContent = {
+                        type: "GRADIENT",
+                        value: {
+                            selectedSolidColor: null,
+                            selectedGradientColor: {
+                                background: "linear-gradient(180deg, #A2CF6B 0%, #F6F6F6 100%)",
+                                color: "#A2CF6B",
+                                selected: true
+                            },
+                            selectedImage: null,
+                            isUploadedImage: false
+                        },
+                        base64: null
+                    }
+                    // widgetDetails.config.bannerContent = widgetDetails.config.bannerContent || {};
+                    // widgetDetails.config.bannerContent.value = widgetDetails.config.bannerContent.value || {};
+                    // widgetDetails.config.bannerContent.value.bannerName = "banner1-TN.svg";
+                    // widgetDetails.config.bannerContent.value.attachmentName = "../../../assets/images/banner1-TN.svg";
+                    // widgetDetails.config.bannerContent.value.attachmentUrl = "../../../assets/images/banner1-TN.svg";
+                    // widgetDetails.config.bannerContent.value.url = "../../../assets/images/banner1-TN.svg";
+                    // widgetDetails.config.bannerContent.value.bannerUrl = "../../../assets/images/banner1-TN.svg";
                 }
             }
 
