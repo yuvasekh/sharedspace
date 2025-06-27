@@ -501,7 +501,7 @@ const Unit4XlDashboard = () => {
 
       setProcessingStatus("Uploading file and starting processing...")
 
-      const response = await fetch("http://localhost:3000/api/xlsxfileupload", {
+      const response = await fetch("https://sharedspace-w4ka.onrender.com/api/xlsxfileupload", {
         method: "POST",
         body: formData,
         signal: abortControllerRef.current.signal,
@@ -667,7 +667,7 @@ const Unit4XlDashboard = () => {
                 </div>
                 <div>
                   <h1 className="text-xl font-semibold text-slate-900">Unit4 Excel Processing</h1>
-                  <p className="text-sm text-slate-500">Long-Running Process Support - Excel with Hyperlinks</p>
+                  {/* <p className="text-sm text-slate-500">Long-Running Process Support - Excel with Hyperlinks</p> */}
                 </div>
               </div>
             </div>
@@ -676,31 +676,7 @@ const Unit4XlDashboard = () => {
                 <Shield className="w-3 h-3 mr-1" />
                 Secure Environment
               </Badge>
-              {hyperlinkCount > 0 && (
-                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
-                  <ExternalLink className="w-3 h-3 mr-1" />
-                  {hyperlinkCount} Hyperlinks Found
-                </Badge>
-              )}
-              <Badge
-                variant="outline"
-                className={
-                  connectionStatus === "online"
-                    ? "bg-green-50 text-green-700 border-green-200"
-                    : "bg-red-50 text-red-700 border-red-200"
-                }
-              >
-                {connectionStatus === "online" ? (
-                  <Wifi className="w-3 h-3 mr-1" />
-                ) : (
-                  <WifiOff className="w-3 h-3 mr-1" />
-                )}
-                {connectionStatus === "online" ? "Online" : "Offline"}
-              </Badge>
-              <Button variant="ghost" size="sm">
-                <HelpCircle className="w-4 h-4 mr-2" />
-                Help
-              </Button>
+           
             </div>
           </div>
         </div>
