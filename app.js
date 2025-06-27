@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useCallback } from "react"
+import { useState, useRef, useCallback, useEffect } from "react"
 import * as XLSX from "xlsx"
 import {
   Upload,
@@ -25,6 +25,7 @@ import {
   Wifi,
   WifiOff,
   ExternalLink,
+  Square,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -50,10 +51,24 @@ const Unit4XlDashboard = () => {
   const [showCookieModal, setShowCookieModal] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState("online")
   const [hyperlinkCount, setHyperlinkCount] = useState(0)
+
+  // New states for long-running process handling
+  const [processingProgress, setProcessingProgress] = useState(0)
+  const [processingStatus, setProcessingStatus] = useState("")
+  const [estimatedTimeRemaining, setEstimatedTimeRemaining] = useState(null)
+  const [processStartTime, setProcessStartTime] = useState(null)
+  const [jobId, setJobId] = useState(null)
+  const [isPolling, setIsPolling] = useState(false)
+  const [canCancel, setCanCancel] = useState(false)
+
   const fileInputRef = useRef(null)
+  const abortControllerRef = useRef(null)
+  const pollingIntervalRef = useRef(null)
 
   // File size limit (10MB to match backend)
   const MAX_FILE_SIZE = 10 * 1024 * 1024
+  // Extended timeout for long-running processes (30 minutes)
+  const EXTENDED_TIMEOUT = 30 * 60 * 1000
 
   // Enhanced hyperlink extraction function
   const extractHyperlinksFromWorksheet = (worksheet, jsonData) => {
@@ -64,10 +79,9 @@ const Unit4XlDashboard = () => {
       const processedRow = { ...row }
 
       Object.keys(processedRow).forEach((columnName, colIndex) => {
-        // Calculate the cell address (e.g., A2, B3, etc.)
         const cellAddress = XLSX.utils.encode_cell({
           c: colIndex,
-          r: rowIndex + 1, // +1 because first row is header
+          r: rowIndex + 1,
         })
 
         const cell = worksheet[cellAddress]
@@ -76,24 +90,16 @@ const Unit4XlDashboard = () => {
           let hasHyperlink = false
           let linkUrl = null
 
-          // Method 1: Check for standard Excel hyperlinks (cell.l.Target)
           if (cell.l && cell.l.Target) {
             linkUrl = cell.l.Target
             hasHyperlink = true
-          }
-          // Method 2: Check for hyperlinks in cell.l.Hyperlink
-          else if (cell.l && cell.l.Hyperlink) {
+          } else if (cell.l && cell.l.Hyperlink) {
             linkUrl = cell.l.Hyperlink
             hasHyperlink = true
-          }
-          // Method 3: Check if the cell value itself is a URL
-          else if (typeof cell.v === "string" && (cell.v.startsWith("http://") || cell.v.startsWith("https://"))) {
+          } else if (typeof cell.v === "string" && (cell.v.startsWith("http://") || cell.v.startsWith("https://"))) {
             linkUrl = cell.v
             hasHyperlink = true
-          }
-          // Method 4: Check for formula-based hyperlinks
-          else if (cell.f && cell.f.includes("HYPERLINK")) {
-            // Extract URL from HYPERLINK formula: =HYPERLINK("url", "display_text")
+          } else if (cell.f && cell.f.includes("HYPERLINK")) {
             const hyperlinkMatch = cell.f.match(/HYPERLINK\s*\(\s*"([^"]+)"/i)
             if (hyperlinkMatch) {
               linkUrl = hyperlinkMatch[1]
@@ -108,7 +114,6 @@ const Unit4XlDashboard = () => {
               hasHyperlink: true,
             }
             totalHyperlinks++
-            console.log(`Found hyperlink in ${cellAddress}: ${linkUrl}`)
           }
         }
       })
@@ -119,6 +124,112 @@ const Unit4XlDashboard = () => {
     setHyperlinkCount(totalHyperlinks)
     return processedData
   }
+
+  // Polling function to check job status
+  const pollJobStatus = useCallback(async (jobId) => {
+    try {
+      const response = await fetch(`https://sharedspace-w4ka.onrender.com/api/job-status/${jobId}`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+
+      const data = await response.json()
+
+      // Update progress and status
+      setProcessingProgress(data.progress || 0)
+      setProcessingStatus(data.status || "Processing...")
+
+      if (data.estimatedTimeRemaining) {
+        setEstimatedTimeRemaining(data.estimatedTimeRemaining)
+      }
+
+      // Check if job is complete
+      if (data.completed) {
+        setIsPolling(false)
+        setIsProcessing(false)
+        setCanCancel(false)
+
+        if (data.success) {
+          setApiResponse(data.result)
+          setProcessingStatus("Completed successfully!")
+        } else {
+          setError(data.error || "Processing failed")
+          setProcessingStatus("Processing failed")
+        }
+
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current)
+          pollingIntervalRef.current = null
+        }
+      }
+    } catch (err) {
+      console.error("Polling error:", err)
+      // Continue polling on error, but log it
+    }
+  }, [])
+
+  // Start polling for job status
+  const startPolling = useCallback(
+    (jobId) => {
+      setIsPolling(true)
+      setJobId(jobId)
+
+      // Poll every 5 seconds
+      pollingIntervalRef.current = setInterval(() => {
+        pollJobStatus(jobId)
+      }, 5000)
+
+      // Initial poll
+      pollJobStatus(jobId)
+    },
+    [pollJobStatus],
+  )
+
+  // Cancel job function
+  const cancelJob = useCallback(async () => {
+    if (!jobId) return
+
+    try {
+      const response = await fetch(`https://sharedspace-w4ka.onrender.com/api/cancel-job/${jobId}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      })
+
+      if (response.ok) {
+        setIsProcessing(false)
+        setIsPolling(false)
+        setCanCancel(false)
+        setProcessingStatus("Cancelled by user")
+
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current)
+          pollingIntervalRef.current = null
+        }
+      }
+    } catch (err) {
+      console.error("Cancel job error:", err)
+    }
+  }, [jobId])
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+      }
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
+    }
+  }, [])
 
   // Check if URL is valid
   const isValidUrl = (string) => {
@@ -133,9 +244,9 @@ const Unit4XlDashboard = () => {
   // Check if file is Excel format
   const isExcelFile = (file) => {
     const validTypes = [
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
-      "application/vnd.ms-excel", // .xls
-      "application/vnd.ms-excel.sheet.macroEnabled.12", // .xlsm
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.ms-excel",
+      "application/vnd.ms-excel.sheet.macroEnabled.12",
     ]
     const validExtensions = [".xlsx", ".xls", ".xlsm"]
     const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf("."))
@@ -143,7 +254,7 @@ const Unit4XlDashboard = () => {
     return validTypes.includes(file.type) || validExtensions.includes(fileExtension)
   }
 
-  // Enhanced error handling for different error types
+  // Enhanced error handling
   const handleError = useCallback((error, context = "") => {
     console.error(`Error in ${context}:`, error)
 
@@ -173,7 +284,7 @@ const Unit4XlDashboard = () => {
     setError(errorMessage)
   }, [])
 
-  // Enhanced file upload handler with hyperlink extraction
+  // File upload handler
   const handleFileUpload = useCallback(
     (event) => {
       const file = event.target.files?.[0]
@@ -183,20 +294,17 @@ const Unit4XlDashboard = () => {
         return
       }
 
-      // Reset previous state
       setError(null)
       setXlPreview([])
       setWorksheetNames([])
       setSelectedWorksheet("")
       setHyperlinkCount(0)
 
-      // Validate file type
       if (!isExcelFile(file)) {
         setError("Please select a valid Excel file (.xlsx, .xls, .xlsm)")
         return
       }
 
-      // Validate file size
       if (file.size > MAX_FILE_SIZE) {
         setError(`File size (${(file.size / 1024 / 1024).toFixed(2)}MB) exceeds the maximum limit of 10MB`)
         return
@@ -205,7 +313,6 @@ const Unit4XlDashboard = () => {
       setXlFile(file)
       setIsParsingFile(true)
 
-      // Parse Excel file for preview with hyperlink extraction
       const reader = new FileReader()
 
       reader.onload = (e) => {
@@ -217,15 +324,12 @@ const Unit4XlDashboard = () => {
             throw new Error("No worksheets found in the Excel file")
           }
 
-          // Get worksheet names
           const sheetNames = workbook.SheetNames
           setWorksheetNames(sheetNames)
 
-          // Use first sheet by default
           const firstSheetName = sheetNames[0]
           setSelectedWorksheet(firstSheetName)
 
-          // Convert first sheet to JSON
           const worksheet = workbook.Sheets[firstSheetName]
           if (!worksheet) {
             throw new Error(`Worksheet "${firstSheetName}" not found`)
@@ -243,13 +347,11 @@ const Unit4XlDashboard = () => {
             return
           }
 
-          // Get headers from first row
           const headers = jsonData[0]
           if (!headers || headers.length === 0) {
             throw new Error("No headers found in the worksheet")
           }
 
-          // Convert remaining rows to objects, limit to first 5 rows for preview
           const dataRows = jsonData.slice(1, 6).map((row, rowIndex) => {
             const obj = {}
             headers.forEach((header, index) => {
@@ -258,7 +360,6 @@ const Unit4XlDashboard = () => {
             return obj
           })
 
-          // Extract hyperlinks from the preview data
           const processedPreview = extractHyperlinksFromWorksheet(worksheet, dataRows)
           setXlPreview(processedPreview)
         } catch (err) {
@@ -278,7 +379,7 @@ const Unit4XlDashboard = () => {
     [handleError],
   )
 
-  // Enhanced worksheet change handler
+  // Worksheet change handler
   const handleWorksheetChange = useCallback(
     (sheetName) => {
       if (!xlFile) return
@@ -288,7 +389,6 @@ const Unit4XlDashboard = () => {
       setError(null)
       setHyperlinkCount(0)
 
-      // Re-parse the file with selected worksheet
       const reader = new FileReader()
       reader.onload = (e) => {
         try {
@@ -321,7 +421,6 @@ const Unit4XlDashboard = () => {
             return obj
           })
 
-          // Extract hyperlinks from the preview data
           const processedPreview = extractHyperlinksFromWorksheet(worksheet, dataRows)
           setXlPreview(processedPreview)
         } catch (err) {
@@ -341,7 +440,7 @@ const Unit4XlDashboard = () => {
     [xlFile, handleError],
   )
 
-  // Enhanced form validation
+  // Form validation
   const validateForm = useCallback(() => {
     if (!instanceUrl.trim()) {
       setError("Instance URL is required")
@@ -366,7 +465,7 @@ const Unit4XlDashboard = () => {
     return true
   }, [instanceUrl, cookie, xlFile])
 
-  // Enhanced submit handler with timeout and better error handling
+  // Enhanced submit handler with long-running process support
   const handleSubmit = useCallback(async () => {
     if (!validateForm()) {
       return
@@ -376,36 +475,36 @@ const Unit4XlDashboard = () => {
     setError(null)
     setApiResponse(null)
     setConnectionStatus("online")
+    setProcessingProgress(0)
+    setProcessingStatus("Initializing...")
+    setProcessStartTime(Date.now())
+    setCanCancel(true)
 
-    // Create abort controller for timeout handling
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 300000) // 5 minute timeout
+    // Create abort controller with extended timeout
+    abortControllerRef.current = new AbortController()
+    const timeoutId = setTimeout(() => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
+    }, EXTENDED_TIMEOUT)
 
     try {
       const formData = new FormData()
-      formData.append("file", xlFile) // Match backend expectation
+      formData.append("file", xlFile)
       formData.append("url", instanceUrl.trim())
       formData.append("cookie", cookie.trim())
+      formData.append("async", "true") // Request async processing
 
       if (selectedWorksheet) {
         formData.append("worksheet", selectedWorksheet)
       }
 
-      console.log("Submitting to backend:", {
-        filename: xlFile.name,
-        size: xlFile.size,
-        worksheet: selectedWorksheet,
-        url: instanceUrl,
-        hyperlinksFound: hyperlinkCount,
-      })
+      setProcessingStatus("Uploading file and starting processing...")
 
       const response = await fetch("http://localhost:3000/api/xlsxfileupload", {
         method: "POST",
         body: formData,
-        signal: controller.signal,
-        headers: {
-          // Don't set Content-Type for FormData, let browser set it with boundary
-        },
+        signal: abortControllerRef.current.signal,
       })
 
       clearTimeout(timeoutId)
@@ -417,27 +516,45 @@ const Unit4XlDashboard = () => {
 
       const data = await response.json()
 
-      if (!data.success) {
+      if (data.jobId) {
+        // Async processing - start polling
+        setProcessingStatus("Processing started. Monitoring progress...")
+        startPolling(data.jobId)
+      } else if (data.success) {
+        // Immediate response (for smaller files)
+        setApiResponse(data)
+        setIsProcessing(false)
+        setCanCancel(false)
+        setProcessingStatus("Completed successfully!")
+        setProcessingProgress(100)
+      } else {
         throw new Error(data.message || "Processing failed")
       }
-
-      setApiResponse(data)
-      console.log("Processing completed successfully:", data)
     } catch (err) {
       clearTimeout(timeoutId)
+      setIsProcessing(false)
+      setCanCancel(false)
 
       if (err.name === "AbortError") {
-        handleError(new Error("Request timed out after 5 minutes"), "submit")
+        setProcessingStatus("Request cancelled")
+        handleError(new Error("Request was cancelled"), "submit")
       } else {
         handleError(err, "submit")
       }
-    } finally {
-      setIsProcessing(false)
     }
-  }, [validateForm, xlFile, instanceUrl, cookie, selectedWorksheet, hyperlinkCount, handleError])
+  }, [validateForm, xlFile, instanceUrl, cookie, selectedWorksheet, handleError, startPolling])
 
-  // Enhanced reset function
+  // Reset function
   const resetForm = useCallback(() => {
+    // Cancel any ongoing operations
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current)
+      pollingIntervalRef.current = null
+    }
+
     setInstanceUrl("https://demo-spaces.gainsightcloud.com")
     setCookie("")
     setXlFile(null)
@@ -448,11 +565,34 @@ const Unit4XlDashboard = () => {
     setError(null)
     setConnectionStatus("online")
     setHyperlinkCount(0)
+    setIsProcessing(false)
+    setIsPolling(false)
+    setProcessingProgress(0)
+    setProcessingStatus("")
+    setEstimatedTimeRemaining(null)
+    setProcessStartTime(null)
+    setJobId(null)
+    setCanCancel(false)
 
     if (fileInputRef.current) {
       fileInputRef.current.value = ""
     }
   }, [])
+
+  // Format time remaining
+  const formatTimeRemaining = (seconds) => {
+    if (!seconds) return null
+    const minutes = Math.floor(seconds / 60)
+    const remainingSeconds = seconds % 60
+    return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`
+  }
+
+  // Calculate elapsed time
+  const getElapsedTime = () => {
+    if (!processStartTime) return null
+    const elapsed = Math.floor((Date.now() - processStartTime) / 1000)
+    return formatTimeRemaining(elapsed)
+  }
 
   // Status color helper
   const getStatusColor = (status) => {
@@ -527,7 +667,7 @@ const Unit4XlDashboard = () => {
                 </div>
                 <div>
                   <h1 className="text-xl font-semibold text-slate-900">Unit4 Excel Processing</h1>
-                  <p className="text-sm text-slate-500">Shared Space POC - Excel Support with Hyperlinks</p>
+                  <p className="text-sm text-slate-500">Long-Running Process Support - Excel with Hyperlinks</p>
                 </div>
               </div>
             </div>
@@ -575,6 +715,43 @@ const Unit4XlDashboard = () => {
           </Alert>
         )}
 
+        {/* Processing Status Alert */}
+        {(isProcessing || isPolling) && (
+          <Alert className="mb-6 border-blue-200 bg-blue-50">
+            <Activity className="h-4 w-4 text-blue-600 animate-pulse" />
+            <AlertDescription className="text-blue-800">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span>{processingStatus}</span>
+                  {canCancel && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={cancelJob}
+                      className="ml-4 h-7 px-3 text-xs bg-transparent"
+                    >
+                      <Square className="w-3 h-3 mr-1" />
+                      Cancel
+                    </Button>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <Progress value={processingProgress} className="h-2" />
+                  <div className="flex justify-between text-xs text-blue-600">
+                    <span>{processingProgress.toFixed(1)}% complete</span>
+                    <div className="flex space-x-4">
+                      {getElapsedTime() && <span>Elapsed: {getElapsedTime()}</span>}
+                      {estimatedTimeRemaining && (
+                        <span>Est. remaining: {formatTimeRemaining(estimatedTimeRemaining)}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* Main Content */}
         <div className="grid lg:grid-cols-3 gap-8">
           {/* Configuration Panel */}
@@ -600,7 +777,7 @@ const Unit4XlDashboard = () => {
                     onChange={(e) => setInstanceUrl(e.target.value)}
                     placeholder="https://your-instance.example.com"
                     className="h-11 border-slate-200 focus:border-green-500 focus:ring-green-500"
-                    disabled={isProcessing}
+                    disabled={isProcessing || isPolling}
                   />
                   {instanceUrl && !isValidUrl(instanceUrl) && (
                     <p className="text-xs text-red-600">Please enter a valid URL</p>
@@ -619,14 +796,14 @@ const Unit4XlDashboard = () => {
                       onChange={(e) => setCookie(e.target.value)}
                       placeholder="Paste your authentication cookie here..."
                       className="min-h-[80px] pr-12 border-slate-200 focus:border-green-500 focus:ring-green-500"
-                      disabled={isProcessing}
+                      disabled={isProcessing || isPolling}
                     />
                     <Button
                       variant="ghost"
                       size="sm"
                       className="absolute top-2 right-2 h-8 w-8 p-0"
                       onClick={() => setShowCookieModal(true)}
-                      disabled={isProcessing}
+                      disabled={isProcessing || isPolling}
                     >
                       <Eye className="w-4 h-4" />
                     </Button>
@@ -646,12 +823,12 @@ const Unit4XlDashboard = () => {
                       accept=".xlsx,.xls,.xlsm"
                       onChange={handleFileUpload}
                       className="hidden"
-                      disabled={isProcessing || isParsingFile}
+                      disabled={isProcessing || isParsingFile || isPolling}
                     />
                     <div
-                      onClick={() => !isProcessing && !isParsingFile && fileInputRef.current?.click()}
+                      onClick={() => !isProcessing && !isParsingFile && !isPolling && fileInputRef.current?.click()}
                       className={`w-full p-6 border-2 border-dashed rounded-lg transition-all duration-200 cursor-pointer group ${
-                        isProcessing || isParsingFile
+                        isProcessing || isParsingFile || isPolling
                           ? "border-slate-200 bg-slate-50 cursor-not-allowed"
                           : "border-slate-300 hover:border-green-400 bg-slate-50 hover:bg-green-50"
                       }`}
@@ -662,7 +839,7 @@ const Unit4XlDashboard = () => {
                         ) : (
                           <Upload
                             className={`w-8 h-8 mx-auto mb-2 transition-colors ${
-                              isProcessing ? "text-slate-300" : "text-slate-400 group-hover:text-green-500"
+                              isProcessing || isPolling ? "text-slate-300" : "text-slate-400 group-hover:text-green-500"
                             }`}
                           />
                         )}
@@ -695,7 +872,7 @@ const Unit4XlDashboard = () => {
                           size="sm"
                           onClick={() => handleWorksheetChange(sheetName)}
                           className="justify-start text-left"
-                          disabled={isProcessing || isParsingFile}
+                          disabled={isProcessing || isParsingFile || isPolling}
                         >
                           {sheetName}
                         </Button>
@@ -710,13 +887,13 @@ const Unit4XlDashboard = () => {
                 <div className="space-y-3">
                   <Button
                     onClick={handleSubmit}
-                    disabled={isProcessing || isParsingFile || !instanceUrl || !cookie || !xlFile}
+                    disabled={isProcessing || isParsingFile || isPolling || !instanceUrl || !cookie || !xlFile}
                     className="w-full h-11 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-medium"
                   >
-                    {isProcessing ? (
+                    {isProcessing || isPolling ? (
                       <>
                         <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                        Processing...
+                        {isPolling ? "Processing..." : "Starting..."}
                       </>
                     ) : (
                       <>
@@ -729,13 +906,29 @@ const Unit4XlDashboard = () => {
                   <Button
                     onClick={resetForm}
                     variant="outline"
-                    className="w-full h-11 border-slate-200"
-                    disabled={isProcessing}
+                    className="w-full h-11 border-slate-200 bg-transparent"
+                    disabled={isProcessing && !canCancel}
                   >
                     <RefreshCw className="w-4 h-4 mr-2" />
                     Reset Form
                   </Button>
                 </div>
+
+                {/* Processing Info */}
+                {(isProcessing || isPolling) && (
+                  <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                    <div className="text-sm text-blue-800 space-y-2">
+                      <div className="flex items-center">
+                        <Clock className="w-4 h-4 mr-2" />
+                        <span className="font-medium">Long-running process active</span>
+                      </div>
+                      <p className="text-xs text-blue-600">
+                        This process can take up to 30 minutes. You can safely close this tab and return later.
+                        {jobId && ` Job ID: ${jobId}`}
+                      </p>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -832,7 +1025,6 @@ const Unit4XlDashboard = () => {
                 </Card>
               </TabsContent>
 
-              {/* Other tabs remain the same... */}
               <TabsContent value="overview" className="space-y-6">
                 {/* Statistics Cards */}
                 {apiResponse ? (
@@ -963,7 +1155,7 @@ const Unit4XlDashboard = () => {
                         <div className="flex items-center justify-center space-x-6 text-sm text-slate-400">
                           <div className="flex items-center">
                             <Clock className="w-4 h-4 mr-2" />
-                            Fast Processing
+                            Long-Running Support
                           </div>
                           <div className="flex items-center">
                             <Shield className="w-4 h-4 mr-2" />
